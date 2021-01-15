@@ -1,0 +1,54 @@
+function SetOwner {
+    param( 
+        [string]$path,
+        [string]$logFile        
+    )
+    $LockedItem = Get-Item -LiteralPath $path -Force
+    $NewOwnerACL = New-Object System.Security.AccessControl.FileSecurity
+    $Admin = New-Object System.Security.Principal.NTAccount("BUILTIN\Administrators")
+    $NewOwnerACL.SetOwner($Admin)
+    $LockedItem.SetAccessControl($NewOwnerACL)
+}
+
+function AddPermission {
+    param( 
+        [string]$path,
+        [string]$logFile = "ErrorLog.csv",
+        [string]$identity
+    )
+    Write-Host $path -NoNewline
+    If ((Test-Path -LiteralPath $path) -eq $False){
+        Write-host " - File not found"
+        Add-Content -Path $logFile "$path, 'File not found'"
+        return
+    }
+    Try {
+        $Acl = Get-Acl -LiteralPath $path -ErrorAction Stop
+        }
+    Catch {
+        Write-Host " - Changing owner... " -NoNewline
+        SetOwner -path $path -logFile $logFile
+        $Acl = Get-Acl -LiteralPath $path -ErrorAction SilentlyContinue
+        }
+       
+    # Create the new ACE
+    $rights = [System.Security.AccessControl.FileSystemRights]"FullControl"
+    $inheritance = [System.Security.AccessControl.InheritanceFlags]"None"
+    $propagation =  [System.Security.AccessControl.PropagationFlags]"None"
+    $type = [System.Security.AccessControl.AccessControlType]"Allow"
+    $ACE = New-Object System.Security.AccessControl.FileSystemAccessRule($identity, $rights, $inheritance, $propagation, $type)
+    $Acl.AddAccessRule($ACE)
+    
+    Try {
+        Set-Acl -LiteralPath $path -AclObject $Acl -ErrorAction Stop
+        Write-Host " - OK!"
+        }
+    Catch [System.UnauthorizedAccessException] {
+        Write-host "Attempted to perform an unauthorized operation"
+        Add-Content -Path $logFile "$path, 'Attempted to perform an unauthorized operation'"        
+        }                
+}
+
+#################    iteration through files here    #######################
+
+Get-Content .\FileList.txt | % {AddPermission -identity "BUILTIN\Administrator" -path $_}
